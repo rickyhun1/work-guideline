@@ -1,0 +1,80 @@
+
+> work-guideline-server@0.1.0 test
+> node --test --test-concurrency=1 test/*.test.js
+
+TAP version 13
+# Subtest: 기본 데이터: 문서 45개, 양식, 원본 파일
+ok 1 - 기본 데이터: 문서 45개, 양식, 원본 파일
+  ---
+  duration_ms: 978.756424
+  type: 'test'
+  ...
+# Subtest: 권한: 총무팀만 편집, 다른 부서는 조회만
+ok 2 - 권한: 총무팀만 편집, 다른 부서는 조회만
+  ---
+  duration_ms: 23.522339
+  type: 'test'
+  ...
+# Subtest: 문서 수정: 변경이력(전→후)과 동시 수정 충돌
+ok 3 - 문서 수정: 변경이력(전→후)과 동시 수정 충돌
+  ---
+  duration_ms: 21.451641
+  type: 'test'
+  ...
+# Subtest: 번호 체계: 미리보기 → 일괄 적용 (직접 지정 번호는 유지)
+ok 4 - 번호 체계: 미리보기 → 일괄 적용 (직접 지정 번호는 유지)
+  ---
+  duration_ms: 78.013362
+  type: 'test'
+  ...
+# Subtest: 양식: 새 버전 업로드 → 최신 파일로 내보내기, 이전 버전 보관
+ok 5 - 양식: 새 버전 업로드 → 최신 파일로 내보내기, 이전 버전 보관
+  ---
+  duration_ms: 13.537456
+  type: 'test'
+  ...
+# Subtest: 법령: 직접 입력, 내용 검색, 문서 연결
+ok 6 - 법령: 직접 입력, 내용 검색, 문서 연결
+  ---
+  duration_ms: 39.571439
+  type: 'test'
+  ...
+# Subtest: 프로젝트: 부서·서류·기한 공유, 복제, 엑셀
+ok 7 - 프로젝트: 부서·서류·기한 공유, 복제, 엑셀
+  ---
+  duration_ms: 74.001846
+  type: 'test'
+  ...
+# Subtest: 묶음 내보내기: 체크한 문서·양식·법령·프로젝트를 zip 하나로
+ok 8 - 묶음 내보내기: 체크한 문서·양식·법령·프로젝트를 zip 하나로
+  ---
+  duration_ms: 213.595944
+  type: 'test'
+  ...
+# Subtest: 권한 부여: 영업팀에 프로젝트 등록·수정 권한 → 바로 반영
+ok 9 - 권한 부여: 영업팀에 프로젝트 등록·수정 권한 → 바로 반영
+  ---
+  duration_ms: 19.156306
+  type: 'test'
+  ...
+# Subtest: 검색: 문서 내용까지
+ok 10 - 검색: 문서 내용까지
+  ---
+  duration_ms: 47.10968
+  type: 'test'
+  ...
+# Subtest: 관리자 최소 1명 유지
+ok 11 - 관리자 최소 1명 유지
+  ---
+  duration_ms: 5.219454
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1942.741298
