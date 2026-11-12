@@ -1,0 +1,31 @@
+{
+  "name": "work-guideline-server",
+  "version": "0.1.0",
+  "description": "업무표준 관리 서버",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --env-file-if-exists=.env --watch src/server.js",
+    "local": "node src/local.js",
+    "migrate": "node --env-file-if-exists=.env scripts/migrate.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cors": "^11.3.1",
+    "@fastify/jwt": "^9.1.0",
+    "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.12.7",
+    "fflate": "^0.8.3",
+    "pg": "^8.23.1"
+  },
+  "optionalDependencies": {
+    "@embedded-postgres/linux-x64": "18.4.0-beta.17",
+    "@embedded-postgres/windows-x64": "18.4.0-beta.17"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}

@@ -1,0 +1,181 @@
+name: Windows 프로그램 빌드
+
+# 프로그램/서버 변경이 올라오면 Windows 실행 파일을 만든다. main 이면 Releases 에도 올린다.
+# main 이 아닌 브랜치에서는 빌드·시험만 하고 실행 파일은 Actions 산출물(artifact)로만 올린다.
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'server/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      VERSION: 0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 서버 패키지 설치
+        working-directory: server
+        run: npm ci
+
+      - name: Windows 플랫폼 파일 생성
+        working-directory: app
+        shell: pwsh
+        run: |
+          flutter create --platforms=windows --project-name work_guideline --org kr.workguideline . 2>&1 | Tee-Object -FilePath ../ci-create.txt
+          Remove-Item -Force -ErrorAction SilentlyContinue test/widget_test.dart
+          # 창 제목: 업무표준 관리
+          $main = 'windows/runner/main.cpp'
+          (Get-Content $main -Raw) -replace 'L"work_guideline"', 'L"\uC5C5\uBB34\uD45C\uC900 \uAD00\uB9AC"' | Set-Content $main -NoNewline
+          Select-String -Path $main -Pattern 'window.Create'
+
+      - name: 빌드
+        working-directory: app
+        shell: pwsh
+        run: flutter build windows --release --dart-define=APP_VERSION=${{ env.VERSION }} 2>&1 | Tee-Object -FilePath ../ci-build.txt
+
+      - name: 배포 폴더 구성
+        shell: pwsh
+        run: |
+          $out = 'dist/WorkGuideline'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item -Recurse app/build/windows/x64/runner/Release/* $out
+          Rename-Item "$out/work_guideline.exe" 'WorkGuideline.exe'
+          # 서버: 한 파일(local.mjs) + 스키마 + PostgreSQL 압축 묶음(pgsql.zip, 처음 실행 때 풀림)
+          node server/scripts/package-local.mjs "$out/server" win32 $env:VERSION
+          Copy-Item (Get-Command node).Source "$out/server/node.exe"
+          @"
+          업무표준 관리 v$env:VERSION
+
+          실행: WorkGuideline.exe 를 더블클릭하세요.
+          - 처음 실행할 때는 데이터베이스를 준비하고 기본 문서(ISO 45개)를 넣느라 조금 더 걸립니다.
+          - 데이터는 C:\ProgramData\WorkGuideline 에 저장됩니다.
+          - server 폴더를 지우거나 옮기지 마세요.
+
+          새 버전으로 바꿀 때: 프로그램을 닫고, 새 압축 파일을 풀어 사용하면 됩니다. 데이터는 그대로 유지됩니다.
+          "@ | Set-Content "$out/README.txt" -Encoding utf8BOM
+          Get-ChildItem $out
+
+      - name: PC 실행 시험 (서버 시작 시간 측정)
+        shell: pwsh
+        run: |
+          $srv = (Resolve-Path dist/WorkGuideline/server).Path
+          $env:DATA_DIR = "$env:RUNNER_TEMP\wgtest"
+          $env:PORT = '37299'
+          $env:HOST = '127.0.0.1'
+          $log = "$PWD\ci-startup.txt"
+          foreach ($n in 1, 2) {
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $p = Start-Process -FilePath "$srv\node.exe" -ArgumentList 'local.mjs' -WorkingDirectory $srv -PassThru `
+                   -RedirectStandardOutput "$env:RUNNER_TEMP\out$n.txt" -RedirectStandardError "$env:RUNNER_TEMP\err$n.txt"
+            $ok = $false
+            while ($sw.Elapsed.TotalSeconds -lt 180) {
+              try { Invoke-RestMethod http://127.0.0.1:37299/health -TimeoutSec 2 | Out-Null; $ok = $true; break }
+              catch { Start-Sleep -Milliseconds 200 }
+            }
+            $t = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+            "실행 $n : 성공=$ok, 걸린 시간=$t 초" | Tee-Object -FilePath $log -Append
+            if (-not $ok) {
+              Get-Content "$env:DATA_DIR\server.log", "$env:RUNNER_TEMP\err$n.txt", "$env:RUNNER_TEMP\out$n.txt" -ErrorAction SilentlyContinue | Add-Content $log
+              throw '서버가 시작되지 않았습니다.'
+            }
+            $failed = $null
+            try {
+              $cfg = Get-Content "$env:DATA_DIR\local.json" -Raw | ConvertFrom-Json
+              $sw2 = [Diagnostics.Stopwatch]::StartNew()
+              $r = Invoke-WebRequest -Method Post -Uri http://127.0.0.1:37299/local/shutdown -Headers @{ 'x-shutdown-token' = "$($cfg.shutdownToken)" } -SkipHttpErrorCheck
+              "  종료 요청 응답: $($r.StatusCode) $($r.Content)" | Tee-Object -FilePath $log -Append
+              $exited = $p.WaitForExit(30000)
+              "  종료됨=$exited ($([math]::Round($sw2.Elapsed.TotalSeconds, 1)) 초)" | Tee-Object -FilePath $log -Append
+              if ($r.StatusCode -ne 200 -or -not $exited) { $failed = '정상 종료 실패' }
+            } catch {
+              $failed = "종료 중 오류: $($_ | Out-String) $($_.ErrorDetails.Message)"
+            }
+            if ($failed) {
+              $failed | Add-Content $log
+              Get-Content "$env:DATA_DIR\server.log", "$env:RUNNER_TEMP\err$n.txt", "$env:RUNNER_TEMP\out$n.txt" -ErrorAction SilentlyContinue | Add-Content $log
+              throw $failed
+            }
+          }
+          '--- server.log ---' | Add-Content $log
+          Get-Content "$env:DATA_DIR\server.log" | Add-Content $log
+
+      - name: 창 닫기 시험 (닫으면 서버·DB도 꺼지는지)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $log = "$PWD\ci-close.txt"
+          $exe = (Resolve-Path dist/WorkGuideline/WorkGuideline.exe).Path
+          $app = Start-Process -FilePath $exe -PassThru
+          $ok = $false
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          while ($sw.Elapsed.TotalSeconds -lt 120) {
+            try { Invoke-RestMethod http://127.0.0.1:37220/health -TimeoutSec 2 | Out-Null; $ok = $true; break } catch { Start-Sleep -Milliseconds 300 }
+          }
+          "서버 시작=$ok ($([math]::Round($sw.Elapsed.TotalSeconds,1)) 초)" | Tee-Object -FilePath $log -Append
+          Start-Sleep 3
+          $app.Refresh()
+          "창 핸들: $($app.MainWindowHandle)" | Tee-Object -FilePath $log -Append
+          $closed = $app.CloseMainWindow()
+          "창 닫기 요청: $closed" | Tee-Object -FilePath $log -Append
+          $exited = $app.WaitForExit(20000)
+          "프로그램 종료됨=$exited" | Tee-Object -FilePath $log -Append
+          Start-Sleep 10
+          $left = Get-Process node, postgres -ErrorAction SilentlyContinue
+          "남은 프로세스: $(($left | ForEach-Object { $_.ProcessName }) -join ', ')" | Tee-Object -FilePath $log -Append
+          $alive = $false
+          try { Invoke-RestMethod http://127.0.0.1:37220/health -TimeoutSec 2 | Out-Null; $alive = $true } catch {}
+          "닫은 뒤 서버 응답=$alive" | Tee-Object -FilePath $log -Append
+          Get-Content "$env:ProgramData\WorkGuideline\server.log" -Tail 8 -ErrorAction SilentlyContinue | Add-Content $log
+          $left | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: 압축
+        shell: pwsh
+        run: |
+          7z a -tzip "WorkGuideline-$env:VERSION.zip" ./dist/WorkGuideline | Select-Object -Last 3
+          Get-Item "WorkGuideline-$env:VERSION.zip" | Select-Object Name, Length
+          "파일 수: $((Get-ChildItem -Recurse -File ./dist/WorkGuideline).Count)" | Tee-Object -FilePath ci-startup.txt -Append
+
+      - name: 로그 올리기
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/push-log.sh ci-logs-windows ci-create.txt ci-build.txt ci-startup.txt ci-close.txt ci-analyze-win.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WorkGuideline-${{ env.VERSION }}
+          path: WorkGuideline-${{ env.VERSION }}.zip
+          retention-days: 14
+
+      - name: Releases 에 올리기
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$env:VERSION" "WorkGuideline-$env:VERSION.zip" `
+            --title "업무표준 관리 v$env:VERSION" `
+            --notes "아래 Assets 에서 WorkGuideline-$env:VERSION.zip 을 내려받아 압축을 풀고 WorkGuideline.exe 를 실행하세요." `
+            --target $env:GITHUB_SHA

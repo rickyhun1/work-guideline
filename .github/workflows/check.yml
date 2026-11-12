@@ -1,0 +1,62 @@
+name: 검사
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  server-test:
+    name: 서버 테스트
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: work_guideline_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/work_guideline_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - working-directory: server
+        run: |
+          npm ci
+          npm test 2>&1 | tee ../ci-server.txt
+      - name: 로그 올리기
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/push-log.sh ci-logs-server ci-server.txt
+
+  app-analyze:
+    name: 프로그램 코드 검사
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - working-directory: app
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter --version 2>&1 | tee ../ci-analyze.txt
+          flutter pub get 2>&1 | tee -a ../ci-analyze.txt
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee -a ../ci-analyze.txt
+          flutter test 2>&1 | tee -a ../ci-analyze.txt
+      - name: 로그 올리기
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/push-log.sh ci-logs-analyze ci-analyze.txt
